@@ -1,123 +1,180 @@
 # ============================================
 # 🤖 Telegram Bot - Escucha pasiva con Webhooks
-# Desarrollado por: [Tu nombre o alias]
-# Descripción:
-#   Este bot escucha los mensajes de un grupo de Telegram.
-#   Si el mensaje contiene palabras clave como "necesito", "pedido", etc.,
-#   reenviará ese mensaje completo a tu chat privado junto con los datos del usuario.
 # ============================================
 
-# --- Importaciones necesarias ---
-from fastapi import FastAPI, Request, Response       # Para crear el servidor web (endpoint de webhook)
-from telegram import Update                          # Representa una actualización de Telegram (mensaje, comando, etc.)
-from telegram.ext import Application, MessageHandler, filters  # Motor del bot
-import os                                             # Para leer variables de entorno
+from fastapi import FastAPI, Request, Response
+from telegram import Update
+from telegram.ext import Application, MessageHandler, filters
+import os
+import logging
 
-# --- Inicializar FastAPI (servidor HTTP) ---
+# Configurar logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# --- Inicializar FastAPI ---
 app = FastAPI()
 
-# --- Variables del bot desde las variables de entorno ---
-# Debes configurarlas en tu hosting (Deta, Railway, etc.)
-BOT_TOKEN = os.getenv("BOT_TOKEN")   # Token que te da @BotFather
-OWNER_ID = os.getenv("OWNER_ID")   # Tu ID personal de Telegram (para reenviarte los mensajes)
+# --- Variables del bot ---
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+OWNER_ID = os.getenv("OWNER_ID")
 
-# --- Crear la aplicación de python-telegram-bot ---
-# 'Application' es el núcleo del bot; maneja los updates, handlers y contexto
+# Validar variables de entorno
+if not BOT_TOKEN:
+    raise ValueError("❌ BOT_TOKEN debe estar configurada como variable de entorno")
+if not OWNER_ID:
+    raise ValueError("❌ OWNER_ID debe estar configurada como variable de entorno")
+
+# --- Crear la aplicación de telegram ---
 application = Application.builder().token(BOT_TOKEN).build()
 
-# --- Lista de palabras clave a detectar ---
-# Puedes añadir, quitar o modificar las que quieras.
+# --- Lista de palabras clave ---
 KEYWORDS = [
     "nesecito",
     "necesito",
-    "pedido",
+    "pedido", 
     "solicito",
     "quiero",
     "busco",
     "me interesa"
 ]
 
-
 # ============================================
-# Función que maneja cada mensaje recibido
+# Manejador de mensajes
 # ============================================
 async def handle_message(update: Update, context):
-    """
-    Esta función se ejecuta cada vez que el bot recibe un mensaje en el grupo.
-    Si el mensaje contiene alguna palabra clave, reenvía los detalles al propietario.
-    """
-    # Verificamos que haya texto (para evitar errores con stickers, fotos, etc.)
-    if update.message and update.message.text:
-        text = update.message.text.lower()  # Convertimos a minúsculas para comparación insensible a mayúsculas
+    try:
+        if update.message and update.message.text:
+            text = update.message.text.lower()
+            
+            if any(k in text for k in KEYWORDS):
+                user = update.message.from_user
+                username = f"@{user.username}" if user.username else "Sin username"
+                fullname = f"{user.first_name or ''} {user.last_name or ''}".strip()
+                user_id = user.id
+                profile_link = f"https://t.me/{user.username}" if user.username else "Sin enlace"
 
-        # Si el mensaje contiene alguna palabra clave de la lista...
-        if any(k in text for k in KEYWORDS):
-            user = update.message.from_user  # Usuario que envió el mensaje
+                message = (
+                    f"📩 *Nuevo mensaje detectado*\n\n"
+                    f"👤 *Nombre:* {fullname}\n"
+                    f"🆔 *ID:* `{user_id}`\n"
+                    f"🔗 *Perfil:* {profile_link}\n"
+                    f"🏷️ *Username:* {username}\n\n"
+                    f"💬 *Mensaje:* {update.message.text}"
+                )
 
-            # --- Recopilar información del usuario ---
-            username = f"@{user.username}" if user.username else "Sin username"
-            fullname = f"{user.first_name or ''} {user.last_name or ''}".strip()
-            user_id = user.id
-            profile_link = f"https://t.me/{user.username}" if user.username else "Sin enlace"
+                await context.bot.send_message(
+                    chat_id=int(OWNER_ID),
+                    text=message,
+                    parse_mode="Markdown"
+                )
+                logger.info(f"✅ Mensaje enviado al owner desde usuario {user_id}")
+                
+    except Exception as e:
+        logger.error(f"❌ Error en handle_message: {e}")
 
-            # --- Crear mensaje de reporte ---
-            message = (
-                f"📩 *Nuevo mensaje detectado*\n\n"
-                f"👤 *Nombre:* {fullname}\n"
-                f"🆔 *ID:* `{user_id}`\n"
-                f"🔗 *Perfil:* {profile_link}\n"
-                f"🏷️ *Username:* {username}\n\n"
-                f"💬 *Mensaje:* {update.message.text}"
-            )
-
-            # --- Enviar mensaje al propietario ---
-            await context.bot.send_message(
-                chat_id=int(OWNER_ID),
-                text=message,
-                parse_mode="Markdown"
-            )
-
-            # Nota: el bot no responde en el grupo (modo pasivo)
-
-
-# --- Registrar el handler (escucha de mensajes de texto que no sean comandos) ---
+# --- Registrar el handler ---
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
+# ============================================
+# INICIALIZACIÓN CRÍTICA - Esto faltaba
+# ============================================
+@app.on_event("startup")
+async def startup_event():
+    """Inicializar el bot cuando FastAPI inicia"""
+    try:
+        await application.initialize()
+        await application.start()
+        logger.info("✅ Bot de Telegram inicializado correctamente")
+    except Exception as e:
+        logger.error(f"❌ Error al inicializar bot: {e}")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Detener el bot cuando FastAPI se cierra"""
+    try:
+        await application.stop()
+        await application.shutdown()
+        logger.info("✅ Bot de Telegram detenido correctamente")
+    except Exception as e:
+        logger.error(f"❌ Error al detener bot: {e}")
 
 # ============================================
-# Endpoint del webhook
+# Endpoints para Webhook (VERSIÓN FUNCIONAL)
+# ============================================
+
+@app.post("/webhook")
+async def telegram_webhook(request: Request):
+    """
+    Endpoint principal para recibir mensajes de Telegram
+    """
+    try:
+        body = await request.json()
+        update = Update.de_json(body, application.bot)
+        await application.process_update(update)
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"❌ Error en webhook: {e}")
+        return {"status": "error", "message": str(e)}, 500
+
+@app.get("/set-webhook")
+async def set_webhook():
+    """
+    Configurar el webhook en Telegram automáticamente
+    """
+    try:
+        webhook_url = "https://telebot-v0nc.onrender.com/webhook"
+        result = await application.bot.set_webhook(webhook_url)
+        
+        # Verificar el webhook configurado
+        webhook_info = await application.bot.get_webhook_info()
+        
+        return {
+            "webhook_set": result,
+            "url": webhook_url,
+            "webhook_info": {
+                "url": webhook_info.url,
+                "has_custom_certificate": webhook_info.has_custom_certificate,
+                "pending_update_count": webhook_info.pending_update_count
+            },
+            "status": "success"
+        }
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+@app.get("/")
+async def root():
+    return {
+        "status": "Bot is running! 🚀",
+        "service": "Telegram Bot - Escucha Pasiva",
+        "endpoints": {
+            "webhook": "POST /webhook",
+            "set_webhook": "GET /set-webhook", 
+            "health": "GET /health"
+        },
+        "instructions": "Visita /set-webhook para configurar el bot"
+    }
+
+@app.get("/health")
+async def health():
+    return {"status": "healthy ✅", "bot": "running"}
+
+# ============================================
+# Endpoint alternativo con token (para compatibilidad)
 # ============================================
 @app.post("/webhook/{token}")
-async def telegram_webhook(token: str, request: Request):
+async def telegram_webhook_with_token(token: str, request: Request):
     """
-    Endpoint que Telegram usará para enviar actualizaciones (mensajes, etc.).
-    Verifica que el token de la URL coincida con el del bot.
+    Endpoint alternativo con token en URL (para compatibilidad)
     """
     if token != BOT_TOKEN:
-        # Seguridad básica: si el token no coincide, se rechaza la petición
         return Response(status_code=403)
-
-    # Convertimos el cuerpo JSON en un objeto Update de Telegram
-    body = await request.json()
-    update = Update.de_json(body, application.bot)
-
-    # Enviamos la actualización a la cola interna del bot para procesarla
-    await application.update_queue.put(update)
-
-    # Respondemos a Telegram para confirmar que todo fue recibido correctamente
-    return {"ok": True}
-
-
-# ============================================
-# Instrucciones de despliegue (resumen)
-# ============================================
-# 1. Crea tu app en Deta Space (Python / FastAPI)
-# 2. Añade tus variables de entorno:
-#      BOT_TOKEN = el token del bot (@BotFather)
-#      OWNER_ID = tu ID personal (usa @userinfobot)
-# 3. Despliega el proyecto.
-# 4. Obtén tu URL pública (por ejemplo: https://mi-bot.deta.app)
-# 5. Configura el webhook:
-#      curl -F "url=https://mi-bot.deta.app/webhook/<TU_TOKEN>" https://api.telegram.org/bot<TU_TOKEN>/setWebhook
-# 6. Añade el bot a tu grupo y desactiva la privacidad con /setprivacy → Disable.
-# 7. Prueba enviando mensajes con las palabras clave (necesito, pedido, etc.).
+    
+    try:
+        body = await request.json()
+        update = Update.de_json(body, application.bot)
+        await application.process_update(update)
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"❌ Error en webhook con token: {e}")
+        return {"status": "error"}, 500
