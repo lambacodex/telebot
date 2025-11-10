@@ -3,6 +3,7 @@ from telegram import Update
 from telegram.ext import Application, MessageHandler, filters
 import os
 import logging
+import asyncio
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -20,7 +21,7 @@ if not BOT_TOKEN:
 if not OWNER_ID:
     raise ValueError("❌ OWNER_ID debe estar configurada como variable de entorno")
 
-# --- Crear aplicación de telegram ---
+# --- Crear e inicializar aplicación de telegram ---
 application = Application.builder().token(BOT_TOKEN).build()
 
 # --- Palabras clave ---
@@ -67,6 +68,21 @@ async def handle_message(update: Update, context):
 # --- Registrar manejador ---
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
+# --- Inicializar la aplicación ---
+@app.on_event("startup")
+async def startup_event():
+    """Inicializar la aplicación de Telegram cuando FastAPI inicie"""
+    await application.initialize()
+    await application.start()
+    logger.info("✅ Bot de Telegram inicializado")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cerrar la aplicación de Telegram cuando FastAPI se detenga"""
+    await application.stop()
+    await application.shutdown()
+    logger.info("❌ Bot de Telegram detenido")
+
 # --- Endpoint de Webhook ---
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
@@ -79,8 +95,7 @@ async def telegram_webhook(request: Request):
         logger.error(f"Error en webhook: {e}")
         return {"status": "error"}, 500
 
-# --- AÑADIR ESTOS NUEVOS ENDPOINTS ---
-
+# --- Endpoint para configurar webhook ---
 @app.get("/set-webhook")
 async def set_webhook():
     try:
@@ -94,6 +109,7 @@ async def set_webhook():
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
+# --- Endpoint para verificar estado ---
 @app.get("/")
 async def root():
     return {
