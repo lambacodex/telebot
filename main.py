@@ -29,7 +29,7 @@ if not OWNER_ID:
 application = Application.builder().token(BOT_TOKEN).build()
 
 # --- Lista de palabras clave ---
-mudanza_keywords = [
+KEYWORDS = [
     # Mudanza / traslado
     "переїзд",
     "переїжджати",
@@ -90,13 +90,29 @@ async def handle_message(update: Update, context):
                 fullname = f"{user.first_name or ''} {user.last_name or ''}".strip()
                 user_id = user.id
                 profile_link = f"https://t.me/{user.username}" if user.username else "Sin enlace"
+                
+                # Obtener información del chat/grupo
+                chat = update.message.chat
+                chat_type = chat.type
+                
+                if chat_type == "private":
+                    chat_info = "💬 *Chat privado*"
+                elif chat_type in ["group", "supergroup"]:
+                    chat_title = chat.title or "Sin nombre"
+                    chat_info = f"👥 *Grupo:* {chat_title}"
+                elif chat_type == "channel":
+                    chat_title = chat.title or "Sin nombre"
+                    chat_info = f"📢 *Canal:* {chat_title}"
+                else:
+                    chat_info = f"❓ *Tipo de chat:* {chat_type}"
 
                 message = (
                     f"📩 *Nuevo mensaje detectado*\n\n"
                     f"👤 *Nombre:* {fullname}\n"
                     f"🆔 *ID:* `{user_id}`\n"
                     f"🔗 *Perfil:* {profile_link}\n"
-                    f"🏷️ *Username:* {username}\n\n"
+                    f"🏷️ *Username:* {username}\n"
+                    f"{chat_info}\n\n"
                     f"💬 *Mensaje:* {update.message.text}"
                 )
 
@@ -105,7 +121,7 @@ async def handle_message(update: Update, context):
                     text=message,
                     parse_mode="Markdown"
                 )
-                logger.info(f"✅ Mensaje enviado al owner desde usuario {user_id}")
+                logger.info(f"✅ Mensaje enviado al owner desde usuario {user_id} en chat {chat_type}")
                 
     except Exception as e:
         logger.error(f"❌ Error en handle_message: {e}")
